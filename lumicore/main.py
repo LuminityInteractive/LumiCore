@@ -33,8 +33,16 @@ async def root():
         }
     )
 
-@app.get("/health")
+@app.get("/health", response_model=APIResponce)
 async def health():
+    return APIResponce(
+        data={
+            "status": "healthy",
+        }
+    )
+
+@app.get("/v1/health", response_model=APIResponce)
+async def versioned_health():
     return APIResponce(
         data={
             "status": "healthy",
