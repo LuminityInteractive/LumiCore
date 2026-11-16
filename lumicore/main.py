@@ -5,12 +5,14 @@ from lumicore.responces import (
     http_exception_handler,
     validation_exception_handler,
 )
+from lumicore.config import settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 app = FastAPI(
     title="LumiCore",
     description="Open-source backend infrastructure for modern applications.",
     version="0.0.1",
+    debug=settings.debug,
 )
 
 app.add_exception_handler(
@@ -47,4 +49,15 @@ async def versioned_health():
         data={
             "status": "healthy",
         }
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "lumicore.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
     )
