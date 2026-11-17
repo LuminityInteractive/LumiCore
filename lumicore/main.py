@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from lumicore.responces import (
     APIResponce,
@@ -8,6 +8,11 @@ from lumicore.responces import (
 from lumicore.config import settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from lumicore.database import get_db
+from lumicore.models import Project
+from lumicore.schemas import ProjectCreate, ProjectResponse
 
 logging.basicConfig(
     level=getattr(
@@ -68,6 +73,38 @@ async def versioned_health():
         }
     )
 
+@app.post(
+    "/v1/management/projects",
+    response_model=APIResponce,
+    status_code=201,
+)
+async def create_project(
+    project_data: ProjectCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    project = Project(
+        name=project_data.name,
+        slug=project_data.slug,
+    )
+    db.add(project)
+    try:
+        await db.commit()
+        await db.refresh(project)
+    except IntegrityError:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PROJECT_ALREADY_EXISTS",
+                "message": "A project with this slug already exists.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
 
 if __name__ == "__main__":
     import uvicorn
