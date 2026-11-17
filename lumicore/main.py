@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
-from lumicore.responces import (
-    APIResponce,
+from lumicore.responses import (
+    APIResponse,
     http_exception_handler,
     validation_exception_handler,
 )
@@ -49,9 +49,9 @@ app.add_exception_handler(
     validation_exception_handler,
 )
 
-@app.get("/", response_model=APIResponce)
+@app.get("/", response_model=APIResponse)
 async def root():
-    return APIResponce(
+    return APIResponse(
         data={
             "name": "LumiCore",
             "version": "0.0.1",
@@ -59,17 +59,17 @@ async def root():
         }
     )
 
-@app.get("/health", response_model=APIResponce)
+@app.get("/health", response_model=APIResponse)
 async def health():
-    return APIResponce(
+    return APIResponse(
         data={
             "status": "healthy",
         }
     )
 
-@app.get("/v1/health", response_model=APIResponce)
+@app.get("/v1/health", response_model=APIResponse)
 async def versioned_health():
-    return APIResponce(
+    return APIResponse(
         data={
             "status": "healthy",
         }
@@ -77,7 +77,7 @@ async def versioned_health():
 
 @app.post(
     "/v1/management/projects",
-    response_model=APIResponce,
+    response_model=APIResponse,
     status_code=201,
 )
 async def create_project(
@@ -104,13 +104,13 @@ async def create_project(
         )
     project_response = ProjectResponse.model_validate(project)
 
-    return APIResponce(
+    return APIResponse(
         data=project_response.model_dump(mode="json"),
     )
 
 @app.get(
     "/v1/management/projects",
-    response_model=APIResponce,
+    response_model=APIResponse,
 )
 async def list_projects(
     db: AsyncSession = Depends(get_db),
@@ -124,11 +124,11 @@ async def list_projects(
         ProjectResponse.model_validate(project).model_dump(mode="json")
         for project in projects
     ]
-    return APIResponce(data=project_responses)
+    return APIResponse(data=project_responses)
 
 @app.get(
     "/v1/management/projects/{project_id}",
-    response_model=APIResponce,
+    response_model=APIResponse,
 )
 async def get_project(
     project_id: UUID,
@@ -149,13 +149,13 @@ async def get_project(
             },
         )
     project_response = ProjectResponse.model_validate(project)
-    return APIResponce(
+    return APIResponse(
         data=project_response.model_dump(mode="json"),
     )
 
 @app.patch(
     "/v1/management/projects/{project_id}",
-    response_model=APIResponce,
+    response_model=APIResponse,
 )
 async def update_project(
     project_id: UUID,
@@ -197,13 +197,13 @@ async def update_project(
             },
         )
     project_response = ProjectResponse.model_validate(project)
-    return APIResponce(
+    return APIResponse(
         data=project_response.model_dump(mode="json"),
     )
 
 @app.delete(
     "/v1/management/projects/{project_id}",
-    response_model=APIResponce,
+    response_model=APIResponse,
 )
 async def delete_project(
     project_id: UUID,
@@ -225,7 +225,7 @@ async def delete_project(
     await db.delete(project)
     await db.commit()
 
-    return APIResponce(
+    return APIResponse(
         data={
             "id": str(project_id),
             "deleted": True,

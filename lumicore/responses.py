@@ -20,7 +20,7 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
 
-class APIResponce(BaseModel):
+class APIResponse(BaseModel):
     data: Any = None
     error: ErrorDetail | None = None
 
@@ -30,7 +30,7 @@ async def http_exception_handler(
     exception: Any,
 ) -> JSONResponse:
     code = HTTP_ERROR_CODES.get(exception.status_code, "HTTP_ERROR")
-    responce = APIResponce(
+    response = APIResponse(
         error=ErrorDetail(
             code=code,
             message=str(exception.detail),
@@ -39,14 +39,14 @@ async def http_exception_handler(
 
     return JSONResponse(
         status_code=exception.status_code,
-        content=responce.model_dump(),
+        content=response.model_dump(),
     )
 
 async def validation_exception_handler(
     _request: Any,
     _exception: Any,
 ) -> JSONResponse:
-    responce = APIResponce(
+    response = APIResponse(
         error=ErrorDetail(
             code="VALIDATION_ERROR",
             message="The request contains invalid data.",
@@ -54,5 +54,5 @@ async def validation_exception_handler(
     )
     return JSONResponse(
         status_code=422,
-        content=responce.model_dump(),
+        content=response.model_dump(),
     )
