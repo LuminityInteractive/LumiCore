@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from lumicore.database import get_db
 from lumicore.models import Project
-from lumicore.schemas import ProjectCreate, ProjectResponse
+from lumicore.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from uuid import UUID
 
 logging.basicConfig(
@@ -152,6 +152,55 @@ async def get_project(
     return APIResponce(
         data=project_response.model_dump(mode="json"),
     )
+
+@app.patch(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def update_project(
+    project_id: UUID,
+    project_data: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code":"PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    updates = {
+        field: value
+        for field, value in project_data.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+
+    for field, value in updates.items():
+        setattr(project, field, value)
+    try:
+        await db.commit()
+        await db.refresh(project)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PROJECT_ALREADY_EXISTS",
+                "message": "A project with this slug already exists.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
