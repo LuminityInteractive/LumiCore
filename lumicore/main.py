@@ -14,6 +14,7 @@ from sqlalchemy import select
 from lumicore.database import get_db
 from lumicore.models import Project
 from lumicore.schemas import ProjectCreate, ProjectResponse
+from uuid import UUID
 
 logging.basicConfig(
     level=getattr(
@@ -124,6 +125,33 @@ async def list_projects(
         for project in projects
     ]
     return APIResponce(data=project_responses)
+
+@app.get(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def get_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
 
 if __name__ == "__main__":
     import uvicorn
