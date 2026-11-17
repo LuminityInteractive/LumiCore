@@ -201,6 +201,37 @@ async def update_project(
         data=project_response.model_dump(mode="json"),
     )
 
+@app.delete(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+    await db.delete(project)
+    await db.commit()
+
+    return APIResponce(
+        data={
+            "id": str(project_id),
+            "deleted": True,
+        }
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
