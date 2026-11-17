@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from lumicore.database import get_db
 from lumicore.models import Project
 from lumicore.schemas import ProjectCreate, ProjectResponse
@@ -105,6 +106,24 @@ async def create_project(
     return APIResponce(
         data=project_response.model_dump(mode="json"),
     )
+
+@app.get(
+    "/v1/management/projects",
+    response_model=APIResponce,
+)
+async def list_projects(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).order_by(Project.created_at.desc())
+    )
+    projects = result.scalars().all()
+
+    project_responses = [
+        ProjectResponse.model_validate(project).model_dump(mode="json")
+        for project in projects
+    ]
+    return APIResponce(data=project_responses)
 
 if __name__ == "__main__":
     import uvicorn
