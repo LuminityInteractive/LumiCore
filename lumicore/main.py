@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from lumicore.responces import (
     APIResponce,
@@ -8,6 +8,13 @@ from lumicore.responces import (
 from lumicore.config import settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from lumicore.database import get_db
+from lumicore.models import Project
+from lumicore.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
+from uuid import UUID
 
 logging.basicConfig(
     level=getattr(
@@ -65,6 +72,163 @@ async def versioned_health():
     return APIResponce(
         data={
             "status": "healthy",
+        }
+    )
+
+@app.post(
+    "/v1/management/projects",
+    response_model=APIResponce,
+    status_code=201,
+)
+async def create_project(
+    project_data: ProjectCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    project = Project(
+        name=project_data.name,
+        slug=project_data.slug,
+    )
+    db.add(project)
+    try:
+        await db.commit()
+        await db.refresh(project)
+    except IntegrityError:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PROJECT_ALREADY_EXISTS",
+                "message": "A project with this slug already exists.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
+
+@app.get(
+    "/v1/management/projects",
+    response_model=APIResponce,
+)
+async def list_projects(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).order_by(Project.created_at.desc())
+    )
+    projects = result.scalars().all()
+
+    project_responses = [
+        ProjectResponse.model_validate(project).model_dump(mode="json")
+        for project in projects
+    ]
+    return APIResponce(data=project_responses)
+
+@app.get(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def get_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
+
+@app.patch(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def update_project(
+    project_id: UUID,
+    project_data: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code":"PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    updates = {
+        field: value
+        for field, value in project_data.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+
+    for field, value in updates.items():
+        setattr(project, field, value)
+    try:
+        await db.commit()
+        await db.refresh(project)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "PROJECT_ALREADY_EXISTS",
+                "message": "A project with this slug already exists.",
+            },
+        )
+    project_response = ProjectResponse.model_validate(project)
+    return APIResponce(
+        data=project_response.model_dump(mode="json"),
+    )
+
+@app.delete(
+    "/v1/management/projects/{project_id}",
+    response_model=APIResponce,
+)
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+    await db.delete(project)
+    await db.commit()
+
+    return APIResponce(
+        data={
+            "id": str(project_id),
+            "deleted": True,
         }
     )
 

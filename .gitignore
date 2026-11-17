@@ -101,6 +101,7 @@ ipython_config.py
 #   commonly ignored for libraries.
 # uv.lock
 roadmap.md
+Analyze.md
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.

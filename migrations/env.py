@@ -4,6 +4,7 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from lumicore.config import settings
 from lumicore.database import Base
+from lumicore.models import Project
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
