@@ -12,8 +12,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from lumicore.database import get_db
-from lumicore.models import Project
-from lumicore.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
+from lumicore.models import (
+    Project,
+    ProjectMembership,
+    User,
+)
+from lumicore.schemas import (
+    ProjectCreate,
+    ProjectResponse,
+    ProjectUpdate,
+    SignupRequest,
+    UserResponse,
+)
+from lumicore.security import hash_password, password_hasher
 from uuid import UUID
 
 logging.basicConfig(
@@ -230,6 +241,61 @@ async def delete_project(
             "id": str(project_id),
             "deleted": True,
         }
+    )
+
+@app.post(
+    "/v1/auth/signup",
+    response_model=APIResponse,
+    status_code=201,
+)
+async def signup(
+    signup_data: SignupRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Project).where(
+            Project.id == signup_data.project_id
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+    user = User(
+        email=str(signup_data.email).lower(),
+        password_hash=hash_password(signup_data.password),
+    )
+
+    db.add(user)
+
+    try:
+        await db.flush()
+        membership = ProjectMembership(
+            user_id=user.id,
+            project_id=project.id,
+        )
+
+        db.add(membership)
+        await db.commit()
+        await db.refresh(user)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code":"USER_ALREADY_EXISTS",
+                "message":"A user with this email already exists",
+            },
+        )
+    user_response = UserResponse.model_validate(user)
+
+    return APIResponse(
+        data=user_response.model_dump(mode="json"),
     )
 
 
