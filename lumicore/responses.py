@@ -29,11 +29,28 @@ async def http_exception_handler(
     request: Any,
     exception: Any,
 ) -> JSONResponse:
-    code = HTTP_ERROR_CODES.get(exception.status_code, "HTTP_ERROR")
+    detail = exception.detail
+
+    if isinstance(detail, dict):
+        code = detail.get(
+            "code",
+            HTTP_ERROR_CODES.get(exception.status_code, "HTTP_ERROR"),
+        )
+        message = detail.get(
+            "message",
+            "The request could not be completed.",
+        )
+    else:
+        code = HTTP_ERROR_CODES.get(
+            exception.status_code,
+            "HTTP_ERROR",
+        )
+        message = str(detail)
+
     response = APIResponse(
         error=ErrorDetail(
             code=code,
-            message=str(exception.detail),
+            message=message,
         )
     )
 
