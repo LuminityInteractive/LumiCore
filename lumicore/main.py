@@ -23,8 +23,15 @@ from lumicore.schemas import (
     ProjectUpdate,
     SignupRequest,
     UserResponse,
+    LoginRequest,
+    TokenResponse,
 )
-from lumicore.security import hash_password, password_hasher
+from lumicore.security import (
+    hash_password,
+    create_access_token,
+    create_refresh_token,
+    verify_password,
+)
 from uuid import UUID
 
 logging.basicConfig(
@@ -298,6 +305,48 @@ async def signup(
         data=user_response.model_dump(mode="json"),
     )
 
+@app.post(
+    "/v1/auth/login",
+    response_model=APIResponse,
+)
+async def login(
+    login_data: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(
+            User.email == str(login_data.email).lower()
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not verify_password(
+        login_data.password,
+        user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_CREDENTIALS",
+                "message":"Invalid email or password.",
+            },
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_CREDENTIALS",
+                "message":"Invalid email or password.",
+            },
+        )
+    token_response = TokenResponse(
+        access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
+    )
+    return APIResponse(
+        data=token_response.model_dump(),
+    )
 
 if __name__ == "__main__":
     import uvicorn
