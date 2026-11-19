@@ -73,3 +73,17 @@ async def validation_exception_handler(
         status_code=422,
         content=response.model_dump(),
     )
+async def unexpected_exception_handler(
+    _request: Any,
+    _exception: Any,
+) -> JSONResponse:
+    response = APIResponse(
+        error=ErrorDetail(
+            code="INTERNAL_SERVER_ERROR",
+            message="An unexpected error occurred.",
+        )
+    )
+    return JSONResponse(
+        status_code=500,
+        content=response.model_dump(),
+    )
