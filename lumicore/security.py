@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 import jwt
 from lumicore.config import settings
+from typing import Any
 
 JWT_ALGORITHM = "HS256"
 
@@ -52,3 +53,19 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
             days=settings.refresh_token_expire_days,
         ),
     )
+def decode_access_token(token:str) -> dict[str, Any]:
+    if not settings.jwt_secret:
+        raise RuntimeError("JWT_SECRET is not configured")
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[JWT_ALGORITHM],
+        )
+    except jwt.InvalidTokenError as exception:
+        raise ValueError("Invalid access token") from exception
+    if payload.get("type") != "access":
+        raise ValueError("Invalid access token type")
+    if not payload.get("sub"):
+        raise ValueError("Access token has no subject")
+    return payload
