@@ -111,6 +111,29 @@ async def get_current_user(
         )
     return user
 
+async def require_project_membership(
+    project_id: UUID,
+    current_user: User,
+    db: AsyncSession,
+) -> ProjectMembership:
+    result = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == current_user.id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code":"FORIBIDDEN",
+                "message":"You do not have access to this project.",
+            },
+        )
+    return membership
+
 @app.get("/", response_model=APIResponse)
 async def root():
     return APIResponse(
@@ -195,19 +218,35 @@ async def list_projects(
 async def get_project(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
     )
 
     project = result.scalar_one_or_none()
-
     if project is None:
         raise HTTPException(
             status_code=404,
             detail={
                 "code": "PROJECT_NOT_FOUND",
                 "message": "The requested project does not exist.",
+            },
+        )
+
+    membership_result = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == current_user.id,
+        )
+    )
+    membership = membership_result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "FORBIDDEN",
+                "message": "You do not have access to this project.",
             },
         )
     project_response = ProjectResponse.model_validate(project)
@@ -492,6 +531,51 @@ async def refresh_access_token(
         data=token_response.model_dump(),
     )
 
+@app.post(
+    "/v1/auth/logout",
+    response_model=APIResponse,
+)
+async def logout(
+    refresh_data: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        payload = decode_refresh_token(
+            refresh_data.refresh_token
+        )
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_REFRESH_TOKEN",
+                "message":"The refresh token is invalid or expired.",
+            },
+        )
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash == hash_token(refresh_data.refresh_token)
+        )
+    )
+
+    stored_token = result.scalar_one_or_none()
+
+    if(stored_token is None or stored_token.user_id != user_id):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+    if stored_token.revoked_at is None:
+        stored_token.revoked_at = now
+        await db.commit()
+    return APIResponse(
+        data={"logged_out":True,}
+    )
 
 @app.get(
     "/v1/auth/me",
