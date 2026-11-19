@@ -140,7 +140,7 @@ async def require_project_membership(
         raise HTTPException(
             status_code=403,
             detail={
-                "code":"FORIBIDDEN",
+                "code":"FORBIDDEN",
                 "message":"You do not have access to this project.",
             },
         )
@@ -220,9 +220,16 @@ async def create_project(
 )
 async def list_projects(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Project).order_by(Project.created_at.desc())
+        select(Project)
+        .join(
+            ProjectMembership,
+            ProjectMembership.project_id == Project.id,
+        ).where(
+            ProjectMembership.user_id == current_user.id,
+        ).order_by(Project.created_at.desc())
     )
     projects = result.scalars().all()
 
@@ -283,6 +290,7 @@ async def update_project(
     project_id: UUID,
     project_data: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
@@ -297,6 +305,12 @@ async def update_project(
                 "message": "The requested project does not exist.",
             },
         )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
 
     updates = {
         field: value
