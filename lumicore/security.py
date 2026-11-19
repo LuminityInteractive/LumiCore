@@ -33,6 +33,7 @@ def _create_token(
     payload = {
         "sub": str(user_id),
         "type": token_type,
+        "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + expires_delta,
     }
