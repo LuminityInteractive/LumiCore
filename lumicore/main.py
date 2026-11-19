@@ -413,6 +413,8 @@ async def refresh_access_token(
     refresh_data: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    now = datetime.now(timezone.utc)
+
     try:
         payload = decode_refresh_token(
             refresh_data.refresh_token
@@ -426,9 +428,34 @@ async def refresh_access_token(
                 "message": "The refresh token is invalid or expired.",
             },
         )
+
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash
+            == hash_token(refresh_data.refresh_token)
+        )
+    )
+
+    stored_token = result.scalar_one_or_none()
+
+    if (
+        stored_token is None
+        or stored_token.revoked_at is not None
+        or stored_token.expires_at <= now
+        or stored_token.user_id != user_id
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
+
     user = result.scalar_one_or_none()
 
     if user is None or not user.is_active:
@@ -439,10 +466,28 @@ async def refresh_access_token(
                 "message": "The refresh token is invalid or expired.",
             },
         )
-    token_response = TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+
+    stored_token.revoked_at = now
+
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=hash_token(refresh_token),
+            expires_at=now
+            + timedelta(days=settings.refresh_token_expire_days),
+        )
     )
+
+    await db.commit()
+
+    token_response = TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
     return APIResponse(
         data=token_response.model_dump(),
     )
