@@ -1,8 +1,6 @@
 import uuid
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from datetime import datetime
-
-from sqlalchemy.sql.functions import sqlutil
 
 class ProjectCreate(BaseModel):
     name: str = Field(
@@ -37,3 +35,36 @@ class ProjectUpdate(BaseModel):
         max_length=100,
         pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
     )
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(
+        min_length=8,
+        max_length=128,
+    )
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(
+        min_length=8,
+        max_length=128,
+    )
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(
+        min_length=1,
+    )
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: EmailStr
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"

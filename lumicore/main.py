@@ -1,5 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
 from lumicore.responses import (
     APIResponse,
     http_exception_handler,
@@ -12,9 +16,33 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from lumicore.database import get_db
-from lumicore.models import Project
-from lumicore.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
+from lumicore.models import (
+    Project,
+    ProjectMembership,
+    User,
+    RefreshToken,
+)
+from lumicore.schemas import (
+    ProjectCreate,
+    ProjectResponse,
+    ProjectUpdate,
+    SignupRequest,
+    UserResponse,
+    LoginRequest,
+    RefreshRequest,
+    TokenResponse,
+)
+from lumicore.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+    hash_password,
+    hash_token,
+    verify_password,
+)
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
 logging.basicConfig(
     level=getattr(
@@ -49,6 +77,73 @@ app.add_exception_handler(
     validation_exception_handler,
 )
 
+security = HTTPBearer(auto_error=False)
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_ACCESS_TOKEN",
+                "message": "The access token is required.",
+            },
+        )
+
+    token = credentials.credentials
+
+    try:
+        payload = decode_access_token(token)
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_ACCESS_TOKEN",
+                "message": "The access token is invalid or expired.",
+            },
+        )
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_ACCESS_TOKEN",
+                "message": "The access token is invalid or expired.",
+            },
+        )
+    return user
+
+async def require_project_membership(
+    project_id: UUID,
+    current_user: User,
+    db: AsyncSession,
+) -> ProjectMembership:
+    result = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == current_user.id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code":"FORBIDDEN",
+                "message":"You do not have access to this project.",
+            },
+        )
+    return membership
+
 @app.get("/", response_model=APIResponse)
 async def root():
     return APIResponse(
@@ -82,7 +177,8 @@ async def versioned_health():
 )
 async def create_project(
     project_data: ProjectCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     project = Project(
         name=project_data.name,
@@ -90,6 +186,14 @@ async def create_project(
     )
     db.add(project)
     try:
+        await db.flush()
+
+        membership = ProjectMembership(
+            user_id=current_user.id,
+            project_id=project.id,
+            role="owner",
+        )
+        db.add(membership)
         await db.commit()
         await db.refresh(project)
     except IntegrityError:
@@ -114,9 +218,16 @@ async def create_project(
 )
 async def list_projects(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Project).order_by(Project.created_at.desc())
+        select(Project)
+        .join(
+            ProjectMembership,
+            ProjectMembership.project_id == Project.id,
+        ).where(
+            ProjectMembership.user_id == current_user.id,
+        ).order_by(Project.created_at.desc())
     )
     projects = result.scalars().all()
 
@@ -133,19 +244,35 @@ async def list_projects(
 async def get_project(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
     )
 
     project = result.scalar_one_or_none()
-
     if project is None:
         raise HTTPException(
             status_code=404,
             detail={
                 "code": "PROJECT_NOT_FOUND",
                 "message": "The requested project does not exist.",
+            },
+        )
+
+    membership_result = await db.execute(
+        select(ProjectMembership).where(
+            ProjectMembership.project_id == project_id,
+            ProjectMembership.user_id == current_user.id,
+        )
+    )
+    membership = membership_result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "FORBIDDEN",
+                "message": "You do not have access to this project.",
             },
         )
     project_response = ProjectResponse.model_validate(project)
@@ -161,6 +288,7 @@ async def update_project(
     project_id: UUID,
     project_data: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
@@ -175,6 +303,12 @@ async def update_project(
                 "message": "The requested project does not exist.",
             },
         )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
 
     updates = {
         field: value
@@ -208,6 +342,7 @@ async def update_project(
 async def delete_project(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
@@ -222,6 +357,12 @@ async def delete_project(
                 "message": "The requested project does not exist.",
             },
         )
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
     await db.delete(project)
     await db.commit()
 
@@ -232,6 +373,240 @@ async def delete_project(
         }
     )
 
+@app.post(
+    "/v1/auth/signup",
+    response_model=APIResponse,
+    status_code=201,
+)
+async def signup(
+    signup_data: SignupRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    user = User(
+        email=str(signup_data.email).lower(),
+        password_hash=hash_password(signup_data.password),
+    )
+
+    db.add(user)
+
+    try:
+        await db.commit()
+        await db.refresh(user)
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code":"USER_ALREADY_EXISTS",
+                "message":"A user with this email already exists",
+            },
+        )
+    user_response = UserResponse.model_validate(user)
+
+    return APIResponse(
+        data=user_response.model_dump(mode="json"),
+    )
+
+@app.post(
+    "/v1/auth/login",
+    response_model=APIResponse,
+)
+async def login(
+    login_data: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(
+            User.email == str(login_data.email).lower()
+        )
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not verify_password(
+        login_data.password,
+        user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_CREDENTIALS",
+                "message":"Invalid email or password.",
+            },
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_CREDENTIALS",
+                "message":"Invalid email or password.",
+            },
+        )
+    access_token=create_access_token(user.id)
+    refresh_token=create_refresh_token(user.id)
+
+    refresh_token_record = RefreshToken(
+        user_id=user.id,
+        token_hash=hash_token(refresh_token),
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(days=settings.refresh_token_expire_days),
+    )
+    db.add(refresh_token_record)
+    await db.commit()
+
+    token_response = TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
+    return APIResponse(
+        data=token_response.model_dump(),
+    )
+
+@app.post(
+    "/v1/auth/refresh",
+    response_model=APIResponse,
+)
+async def refresh_access_token(
+    refresh_data: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        payload = decode_refresh_token(
+            refresh_data.refresh_token
+        )
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash
+            == hash_token(refresh_data.refresh_token)
+        )
+    )
+
+    stored_token = result.scalar_one_or_none()
+
+    if (
+        stored_token is None
+        or stored_token.revoked_at is not None
+        or stored_token.expires_at <= now
+        or stored_token.user_id != user_id
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+
+    stored_token.revoked_at = now
+
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+
+    db.add(
+        RefreshToken(
+            user_id=user.id,
+            token_hash=hash_token(refresh_token),
+            expires_at=now
+            + timedelta(days=settings.refresh_token_expire_days),
+        )
+    )
+
+    await db.commit()
+
+    token_response = TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
+    return APIResponse(
+        data=token_response.model_dump(),
+    )
+
+@app.post(
+    "/v1/auth/logout",
+    response_model=APIResponse,
+)
+async def logout(
+    refresh_data: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+
+    try:
+        payload = decode_refresh_token(
+            refresh_data.refresh_token
+        )
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_REFRESH_TOKEN",
+                "message":"The refresh token is invalid or expired.",
+            },
+        )
+    result = await db.execute(
+        select(RefreshToken).where(
+            RefreshToken.token_hash == hash_token(refresh_data.refresh_token)
+        )
+    )
+
+    stored_token = result.scalar_one_or_none()
+
+    if(stored_token is None or stored_token.user_id != user_id):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+    if stored_token.revoked_at is None:
+        stored_token.revoked_at = now
+        await db.commit()
+    return APIResponse(
+        data={"logged_out":True,}
+    )
+
+@app.get(
+    "/v1/auth/me",
+    response_model=APIResponse,
+)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+):
+    user_response = UserResponse.model_validate(current_user)
+    return APIResponse(
+        data=user_response.model_dump(mode="json"),
+    )
 
 if __name__ == "__main__":
     import uvicorn
