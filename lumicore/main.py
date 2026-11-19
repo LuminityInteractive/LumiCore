@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import OAuth2PasswordBearer
 from lumicore.responses import (
     APIResponse,
     http_exception_handler,
@@ -27,9 +28,10 @@ from lumicore.schemas import (
     TokenResponse,
 )
 from lumicore.security import (
-    hash_password,
     create_access_token,
     create_refresh_token,
+    decode_access_token,
+    hash_password,
     verify_password,
 )
 from uuid import UUID
@@ -66,6 +68,41 @@ app.add_exception_handler(
     RequestValidationError,
     validation_exception_handler,
 )
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/v1/auth/login",
+)
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    try:
+        payload = decode_access_token(token)
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_ACCESS_TOKEN",
+                "message": "The access token is invalid or expired.",
+            },
+        )
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code":"INVALID_ACCESS_TOKEN",
+                "message": "The access token is invalid or expired.",
+            },
+        )
+    return user
 
 @app.get("/", response_model=APIResponse)
 async def root():
@@ -346,6 +383,18 @@ async def login(
     )
     return APIResponse(
         data=token_response.model_dump(),
+    )
+
+@app.get(
+    "/v1/auth/me",
+    response_model=APIResponse,
+)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user),
+):
+    user_response = UserResponse.model_validate(current_user)
+    return APIResponse(
+        data=user_response.model_dump(mode="json"),
     )
 
 if __name__ == "__main__":
