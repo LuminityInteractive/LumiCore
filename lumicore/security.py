@@ -53,7 +53,10 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
             days=settings.refresh_token_expire_days,
         ),
     )
-def decode_access_token(token:str) -> dict[str, Any]:
+def _decode_token(
+    token:str,
+    expected_type:str,
+) -> dict[str, Any]:
     if not settings.jwt_secret:
         raise RuntimeError("JWT_SECRET is not configured")
     try:
@@ -64,8 +67,13 @@ def decode_access_token(token:str) -> dict[str, Any]:
         )
     except jwt.InvalidTokenError as exception:
         raise ValueError("Invalid access token") from exception
-    if payload.get("type") != "access":
+    if payload.get("type") != expected_type:
         raise ValueError("Invalid access token type")
     if not payload.get("sub"):
         raise ValueError("Access token has no subject")
     return payload
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    return _decode_token(token, "access")
+def decode_refresh_token(token: str) -> dict[str, Any]:
+    return _decode_token(token, "refresh")

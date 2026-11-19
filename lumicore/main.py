@@ -25,12 +25,14 @@ from lumicore.schemas import (
     SignupRequest,
     UserResponse,
     LoginRequest,
+    RefreshRequest,
     TokenResponse,
 )
 from lumicore.security import (
     create_access_token,
     create_refresh_token,
     decode_access_token,
+    decode_refresh_token,
     hash_password,
     verify_password,
 )
@@ -384,6 +386,49 @@ async def login(
     return APIResponse(
         data=token_response.model_dump(),
     )
+
+@app.post(
+    "/v1/auth/refresh",
+    response_model=APIResponse,
+)
+async def refresh_access_token(
+    refresh_data: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        payload = decode_refresh_token(
+            refresh_data.refresh_token
+        )
+        user_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_REFRESH_TOKEN",
+                "message": "The refresh token is invalid or expired.",
+            },
+        )
+    token_response = TokenResponse(
+        access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
+    )
+    return APIResponse(
+        data=token_response.model_dump(),
+    )
+
 
 @app.get(
     "/v1/auth/me",
