@@ -1,5 +1,3 @@
-from weakref import ref
-
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import (
@@ -384,25 +382,6 @@ async def signup(
     signup_data: SignupRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    project = None
-
-    if signup_data.project_id is not None:
-        result = await db.execute(
-            select(Project).where(
-                Project.id == signup_data.project_id
-            )
-        )
-        project = result.scalar_one_or_none()
-
-        if project is None:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "PROJECT_NOT_FOUND",
-                    "message": "The requested project does not exist.",
-                },
-            )
-
     user = User(
         email=str(signup_data.email).lower(),
         password_hash=hash_password(signup_data.password),
@@ -411,16 +390,6 @@ async def signup(
     db.add(user)
 
     try:
-        await db.flush()
-
-        if project is not None:
-            membership = ProjectMembership(
-                user_id=user.id,
-                project_id=project.id,
-                role="member",
-            )
-
-            db.add(membership)
         await db.commit()
         await db.refresh(user)
     except IntegrityError:
