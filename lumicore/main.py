@@ -2,7 +2,10 @@ from weakref import ref
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
+)
 from lumicore.responses import (
     APIResponse,
     http_exception_handler,
@@ -76,14 +79,23 @@ app.add_exception_handler(
     validation_exception_handler,
 )
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/v1/auth/login",
-)
+security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_ACCESS_TOKEN",
+                "message": "The access token is required.",
+            },
+        )
+
+    token = credentials.credentials
+
     try:
         payload = decode_access_token(token)
         user_id = UUID(str(payload["sub"]))
@@ -167,7 +179,8 @@ async def versioned_health():
 )
 async def create_project(
     project_data: ProjectCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     project = Project(
         name=project_data.name,
@@ -175,6 +188,14 @@ async def create_project(
     )
     db.add(project)
     try:
+        await db.flush()
+
+        membership = ProjectMembership(
+            user_id=current_user.id,
+            project_id=project.id,
+            role="owner",
+        )
+        db.add(membership)
         await db.commit()
         await db.refresh(project)
     except IntegrityError:
