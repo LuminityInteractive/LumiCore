@@ -344,6 +344,7 @@ async def update_project(
 async def delete_project(
     project_id: UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
         select(Project).where(Project.id == project_id)
@@ -358,6 +359,12 @@ async def delete_project(
                 "message": "The requested project does not exist.",
             },
         )
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
     await db.delete(project)
     await db.commit()
 
