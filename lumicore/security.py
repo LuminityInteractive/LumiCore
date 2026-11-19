@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from lumicore.config import settings
 from typing import Any
+import hashlib
 
 JWT_ALGORITHM = "HS256"
 
@@ -14,6 +15,11 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_hash: str) -> bool:
     return password_hasher.verify(password, password_hash)
+
+def hash_token(token:str) -> str:
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
 
 def _create_token(
     user_id: uuid.UUID,

@@ -1,3 +1,5 @@
+from weakref import ref
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordBearer
@@ -17,6 +19,7 @@ from lumicore.models import (
     Project,
     ProjectMembership,
     User,
+    RefreshToken,
 )
 from lumicore.schemas import (
     ProjectCreate,
@@ -34,9 +37,11 @@ from lumicore.security import (
     decode_access_token,
     decode_refresh_token,
     hash_password,
+    hash_token,
     verify_password,
 )
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
 logging.basicConfig(
     level=getattr(
@@ -379,10 +384,23 @@ async def login(
                 "message":"Invalid email or password.",
             },
         )
-    token_response = TokenResponse(
-        access_token=create_access_token(user.id),
-        refresh_token=create_refresh_token(user.id),
+    access_token=create_access_token(user.id)
+    refresh_token=create_refresh_token(user.id)
+
+    refresh_token_record = RefreshToken(
+        user_id=user.id,
+        token_hash=hash_token(refresh_token),
+        expires_at=datetime.now(timezone.utc)
+        + timedelta(days=settings.refresh_token_expire_days),
     )
+    db.add(refresh_token_record)
+    await db.commit()
+
+    token_response = TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
     return APIResponse(
         data=token_response.model_dump(),
     )
