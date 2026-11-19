@@ -363,20 +363,25 @@ async def signup(
     signup_data: SignupRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Project).where(
-            Project.id == signup_data.project_id
+    project = None
+
+    if signup_data.project_id is not None:
+        result = await db.execute(
+            select(Project).where(
+                Project.id == signup_data.project_id
+            )
         )
-    )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "PROJECT_NOT_FOUND",
-                "message": "The requested project does not exist.",
-            },
-        )
+        project = result.scalar_one_or_none()
+
+        if project is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "PROJECT_NOT_FOUND",
+                    "message": "The requested project does not exist.",
+                },
+            )
+
     user = User(
         email=str(signup_data.email).lower(),
         password_hash=hash_password(signup_data.password),
@@ -386,12 +391,15 @@ async def signup(
 
     try:
         await db.flush()
-        membership = ProjectMembership(
-            user_id=user.id,
-            project_id=project.id,
-        )
 
-        db.add(membership)
+        if project is not None:
+            membership = ProjectMembership(
+                user_id=user.id,
+                project_id=project.id,
+                role="member",
+            )
+
+            db.add(membership)
         await db.commit()
         await db.refresh(user)
     except IntegrityError:

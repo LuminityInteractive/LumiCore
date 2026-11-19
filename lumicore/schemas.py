@@ -44,7 +44,7 @@ class SignupRequest(BaseModel):
         min_length=8,
         max_length=128,
     )
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None
 
 class LoginRequest(BaseModel):
     email: EmailStr
