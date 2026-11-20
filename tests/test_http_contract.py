@@ -1,16 +1,11 @@
 import asyncio
 import json
 
-from fastapi.testclient import TestClient
-
 from lumicore.main import app
 from lumicore.responses import unexpected_exception_handler
 
 
-client = TestClient(app)
-
-
-def test_root_response():
+def test_root_response(client):
     response = client.get("/")
 
     assert response.status_code == 200
@@ -18,7 +13,7 @@ def test_root_response():
     assert response.json()["data"]["name"] == "LumiCore"
 
 
-def test_health_response():
+def test_health_response(client):
     response = client.get("/health")
 
     assert response.status_code == 200
@@ -30,7 +25,7 @@ def test_health_response():
     }
 
 
-def test_database_health_response():
+def test_database_health_response(client):
     response = client.get("/health/database")
 
     assert response.status_code == 200
@@ -43,7 +38,7 @@ def test_database_health_response():
     }
 
 
-def test_versioned_health_response():
+def test_versioned_health_response(client):
     response = client.get("/v1/health")
 
     assert response.status_code == 200
@@ -55,7 +50,7 @@ def test_versioned_health_response():
     }
 
 
-def test_unknown_route_returns_not_found():
+def test_unknown_route_returns_not_found(client):
     response = client.get("/missing")
 
     assert response.status_code == 404
@@ -68,7 +63,7 @@ def test_unknown_route_returns_not_found():
     }
 
 
-def test_protected_endpoint_requires_access_token():
+def test_protected_endpoint_requires_access_token(client):
     response = client.get("/v1/auth/me")
 
     assert response.status_code == 401
@@ -81,7 +76,7 @@ def test_protected_endpoint_requires_access_token():
     }
 
 
-def test_invalid_signup_data_returns_validation_error():
+def test_invalid_signup_data_returns_validation_error(client):
     response = client.post(
         "/v1/auth/signup",
         json={
