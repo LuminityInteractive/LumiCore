@@ -13,10 +13,10 @@ from lumicore.responses import (
 from lumicore.config import settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from lumicore.database import get_db
+from sqlalchemy import select, text
+from lumicore.database import get_db, engine
 from lumicore.models import (
     Project,
     ProjectMembership,
@@ -165,6 +165,26 @@ async def health():
     return APIResponse(
         data={
             "status": "healthy",
+        }
+    )
+
+@app.get("/health/database", response_model=APIResponse)
+async def database_health():
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code":"DATABASE_UNAVAILABLE",
+                "message":"The database is currently unavailable.",
+            },
+        )
+    return APIResponse(
+        data={
+            "status":"healthy",
+            "database":"healthy",
         }
     )
 
