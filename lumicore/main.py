@@ -22,6 +22,7 @@ from lumicore.models import (
     ProjectMembership,
     User,
     RefreshToken,
+    APIKey,
 )
 from lumicore.schemas import (
     ProjectCreate,
@@ -32,6 +33,8 @@ from lumicore.schemas import (
     LoginRequest,
     RefreshRequest,
     TokenResponse,
+    APIKeyCreate,
+    APIKeyCreatedResponse,
 )
 from lumicore.security import (
     create_access_token,
@@ -41,6 +44,7 @@ from lumicore.security import (
     hash_password,
     hash_token,
     verify_password,
+    generate_api_key,
 )
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
@@ -397,6 +401,85 @@ async def delete_project(
             "id": str(project_id),
             "deleted": True,
         }
+    )
+
+@app.post(
+    "/v1/management/projects/{project_id}/api-keys",
+    response_model=APIResponse,
+    status_code=201,
+)
+async def create_api_key(
+    project_id: UUID,
+    key_data: APIKeyCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
+    if (
+        key_data.expires_at is not None
+        and key_data.expires_at <= datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "INVALID_EXPIRATION",
+                "message": "The expiration date must be in the future.",
+            },
+        )
+
+    full_key, key_prefix, key_hash = generate_api_key(
+        key_data.key_type,
+    )
+
+    api_key = APIKey(
+        project_id=project_id,
+        created_by_user_id=current_user.id,
+        name=key_data.name,
+        key_prefix=key_prefix,
+        key_hash=key_hash,
+        key_type=key_data.key_type,
+        expires_at=key_data.expires_at,
+    )
+
+    db.add(api_key)
+    await db.commit()
+    await db.refresh(api_key)
+
+    response = APIKeyCreatedResponse(
+        id=api_key.id,
+        project_id=api_key.project_id,
+        name=api_key.name,
+        key_prefix=api_key.key_prefix,
+        key_type=api_key.key_type,
+        expires_at=api_key.expires_at,
+        last_used_at=api_key.last_used_at,
+        revoked_at=api_key.revoked_at,
+        created_at=api_key.created_at,
+        key=full_key,
+    )
+
+    return APIResponse(
+        data=response.model_dump(mode="json"),
     )
 
 @app.post(
