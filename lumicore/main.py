@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import (
     HTTPAuthorizationCredentials,
@@ -35,6 +35,7 @@ from lumicore.schemas import (
     TokenResponse,
     APIKeyCreate,
     APIKeyCreatedResponse,
+    APIKeyContext,
     APIKeyResponse,
 )
 from lumicore.security import (
@@ -131,6 +132,63 @@ async def get_current_user(
             },
         )
     return user
+
+async def get_api_key_context(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> APIKeyContext:
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_API_KEY",
+                "message": "An API key is required.",
+            },
+        )
+
+    result = await db.execute(
+        select(APIKey).where(APIKey.key_hash == hash_token(x_api_key))
+    )
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "INVALID_API_KEY",
+                "message": "The API key is invalid.",
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if api_key.revoked_at is not None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "API_KEY_REVOKED",
+                "message": "The API key has been revoked.",
+            },
+        )
+
+    if api_key.expires_at is not None and api_key.expires_at <= now:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "API_KEY_EXPIRED",
+                "message": "The API key has expired.",
+            },
+        )
+
+    api_key.last_used_at = now
+    await db.commit()
+
+    return APIKeyContext(
+        id=api_key.id,
+        project_id=api_key.project_id,
+        name=api_key.name,
+        key_type=api_key.key_type,
+    )
 
 async def require_project_membership(
     project_id: UUID,
@@ -598,6 +656,17 @@ async def revoke_api_key(
             "id": str(api_key.id),
             "revoked": True,
         }
+    )
+
+@app.get(
+    "/v1/api-keys/me",
+    response_model=APIResponse,
+)
+async def api_key_me(
+    api_key_context: APIKeyContext = Depends(get_api_key_context),
+):
+    return APIResponse(
+        data=api_key_context.model_dump(mode="json"),
     )
 
 @app.post(

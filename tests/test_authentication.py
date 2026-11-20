@@ -163,6 +163,128 @@ def test_owner_can_create_and_manage_project(client):
     assert deleted.status_code == 200
 
 
+def test_api_key_context(client):
+    email = f"api-key-{uuid4()}@example.com"
+    assert signup(client, email).status_code == 201
+    tokens = login(client, email)
+    headers = auth_headers(tokens["access_token"])
+
+    created_project = client.post(
+        "/v1/management/projects",
+        headers=headers,
+        json={
+            "name": "API Key Project",
+            "slug": f"api-key-project-{uuid4().hex[:8]}",
+        },
+    )
+    assert created_project.status_code == 201
+    project_id = created_project.json()["data"]["id"]
+
+    created_key = client.post(
+        f"/v1/management/projects/{project_id}/api-keys",
+        headers=headers,
+        json={
+            "name": "Test public key",
+            "key_type": "public",
+        },
+    )
+    assert created_key.status_code == 201
+
+    key_data = created_key.json()["data"]
+
+    response = client.get(
+        "/v1/api-keys/me",
+        headers={"X-API-Key": key_data["key"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["id"] == key_data["id"]
+    assert response.json()["data"]["project_id"] == project_id
+    assert response.json()["data"]["key_type"] == "public"
+
+
+def test_valid_api_key_updates_last_used_at(client):
+    email = f"api-key-used-{uuid4()}@example.com"
+    assert signup(client, email).status_code == 201
+    tokens = login(client, email)
+    headers = auth_headers(tokens["access_token"])
+
+    created_project = client.post(
+        "/v1/management/projects",
+        headers=headers,
+        json={
+            "name": "API Key Used Project",
+            "slug": f"api-key-used-{uuid4().hex[:8]}",
+        },
+    )
+    project_id = created_project.json()["data"]["id"]
+
+    created_key = client.post(
+        f"/v1/management/projects/{project_id}/api-keys",
+        headers=headers,
+        json={"name": "Used key", "key_type": "public"},
+    )
+    key_data = created_key.json()["data"]
+
+    response = client.get(
+        "/v1/api-keys/me",
+        headers={"X-API-Key": key_data["key"]},
+    )
+
+    assert response.status_code == 200
+
+
+def test_revoked_api_key_is_rejected(client):
+    email = f"api-key-revoked-{uuid4()}@example.com"
+    assert signup(client, email).status_code == 201
+    tokens = login(client, email)
+    headers = auth_headers(tokens["access_token"])
+
+    created_project = client.post(
+        "/v1/management/projects",
+        headers=headers,
+        json={
+            "name": "Revoked Key Project",
+            "slug": f"revoked-key-{uuid4().hex[:8]}",
+        },
+    )
+    project_id = created_project.json()["data"]["id"]
+
+    created_key = client.post(
+        f"/v1/management/projects/{project_id}/api-keys",
+        headers=headers,
+        json={"name": "Revoked key", "key_type": "public"},
+    )
+    key_data = created_key.json()["data"]
+
+    revoked = client.delete(
+        f"/v1/management/projects/{project_id}/api-keys/{key_data['id']}",
+        headers=headers,
+    )
+    assert revoked.status_code == 200
+
+    response = client.get(
+        "/v1/api-keys/me",
+        headers={"X-API-Key": key_data["key"]},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "API_KEY_REVOKED"
+
+
+def test_missing_and_invalid_api_key(client):
+    response = client.get("/v1/api-keys/me")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_API_KEY"
+
+    response = client.get(
+        "/v1/api-keys/me",
+        headers={"X-API-Key": "lc_pub_invalid"},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_API_KEY"
+
+
 def test_non_member_cannot_access_project(client):
     owner_email = f"owner-{uuid4()}@example.com"
     member_email = f"member-{uuid4()}@example.com"
