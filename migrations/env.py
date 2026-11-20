@@ -9,6 +9,7 @@ from lumicore.models import (
     ProjectMembership,
     RefreshToken,
     User,
+    APIKey,
 )
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
