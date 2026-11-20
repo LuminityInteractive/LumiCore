@@ -8,6 +8,7 @@ from lumicore.responses import (
     APIResponse,
     http_exception_handler,
     validation_exception_handler,
+    unexpected_exception_handler,
 )
 from lumicore.config import settings
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -75,6 +76,11 @@ app.add_exception_handler(
 app.add_exception_handler(
     RequestValidationError,
     validation_exception_handler,
+)
+
+app.add_exception_handler(
+    Exception,
+    unexpected_exception_handler,
 )
 
 security = HTTPBearer(auto_error=False)
