@@ -10,73 +10,83 @@ Open-source backend infrastructure for modern applications.
 
 ## Status
 
-Early development. The current implementation includes the HTTP API
-foundation, PostgreSQL integration, project management, authentication,
-protected Management API endpoints, Docker Compose runtime, and automated
-tests.
+Early development. The current implementation includes:
 
-## Implemented
-
-- FastAPI application with versioned `/v1` endpoints.
-- Standard `{ "data": ..., "error": ... }` response envelope.
-- Centralized HTTP and validation error handling.
-- PostgreSQL 16 with SQLAlchemy 2.x and `asyncpg`.
-- Alembic database migrations.
-- Project CRUD operations.
-- Project membership checks and owner membership on project creation.
-- Password hashing with Argon2.
-- JWT access and refresh tokens.
-- Refresh token rotation and revocation.
-- Bearer-token authentication for the Management API.
-- Docker Compose runtime for the API and PostgreSQL.
+- FastAPI HTTP API;
+- PostgreSQL with SQLAlchemy and Alembic;
+- project CRUD and membership checks;
+- password hashing and JWT authentication;
+- protected Management API;
+- Docker Compose runtime;
+- automated HTTP and authentication tests.
 
 ## Requirements
 
-- Python 3.14 or newer.
-- [`uv`](https://docs.astral.sh/uv/).
-- Docker Engine.
+- Python 3.14+;
+- `uv`;
+- Docker Engine;
 - Docker Compose.
 
-PostgreSQL does not need to be installed on the host system. It runs in a
-Docker container.
+PostgreSQL does not need to be installed on the host. Docker Compose pulls the
+`postgres:16-alpine` image and runs PostgreSQL in a container.
 
 ## Quick start
 
-Copy the environment template:
+Clone the repository and enter its directory:
+
+```bash
+git clone https://github.com/LuminityInteractive/LumiCore.git
+cd LumiCore
+```
+
+### 1. Configure the environment
 
 ```bash
 cp .env.example .env
 ```
 
-Set a local PostgreSQL password and a random JWT secret in `.env`. The password
-in `DATABASE_URL` must match `POSTGRES_PASSWORD`.
+Edit `.env` and set at least:
 
-Start the complete local stack:
+```env
+POSTGRES_PASSWORD=<local-password>
+JWT_SECRET=<random-secret>
+```
+
+The password in `DATABASE_URL` must match `POSTGRES_PASSWORD` for local API
+execution. When the API runs in Docker Compose, Compose provides an internal
+database URL using the `database` service hostname.
+
+### 2. Start the stack
 
 ```bash
 docker compose up -d --build
 ```
 
-Check container status:
+This starts:
+
+```text
+lumicore-api        FastAPI + Uvicorn
+lumicore-database   PostgreSQL 16
+```
+
+### 3. Apply database migrations
+
+On a new database, apply the schema before using database-backed endpoints:
+
+```bash
+docker compose exec api uv run --no-sync alembic upgrade head
+```
+
+### 4. Verify the runtime
 
 ```bash
 docker compose ps
-```
-
-The API is available at:
-
-```text
-http://localhost:8000
-```
-
-Basic health checks:
-
-```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/health/database
 ```
 
-Interactive API documentation:
+Both Compose services should be running and healthy. API documentation is
+available at:
 
 ```text
 http://localhost:8000/docs
@@ -92,34 +102,22 @@ docker compose down
 
 ## Local development
 
-Run only PostgreSQL in Docker:
+Run PostgreSQL in Docker and the API locally with auto-reload:
 
 ```bash
 docker compose up -d database
-```
-
-Run the API locally with auto-reload:
-
-```bash
 uv run --env-file .env uvicorn lumicore.main:app --reload
 ```
 
-When running the API locally, `DATABASE_URL` must use `localhost`:
-
-```text
-postgresql+asyncpg://<user>:<password>@localhost:5432/<database>
-```
-
-When running the API inside Docker Compose, the database hostname is the
-Compose service name:
-
-```text
-postgresql+asyncpg://<user>:<password>@database:5432/<database>
-```
+For local API execution, `DATABASE_URL` must use `localhost`. For the Docker
+API service, the database hostname is `database` and is configured by
+`compose.yml`.
 
 ## Tests
 
-Tests use the separate `lumicore_test` PostgreSQL database. Create it once:
+Tests use a separate PostgreSQL database named `lumicore_test`.
+
+Create it once:
 
 ```bash
 docker compose exec database psql \
@@ -128,7 +126,7 @@ docker compose exec database psql \
   -c "CREATE DATABASE lumicore_test OWNER lumicore;"
 ```
 
-Apply migrations to the test database:
+Apply migrations:
 
 ```bash
 env \
@@ -146,12 +144,12 @@ env \
   uv run pytest
 ```
 
-The test fixtures clear the test tables between tests. The development
-database is not used by the test suite.
+Test fixtures clear the test tables between tests. The development database is
+not used by the test suite.
 
 ## Database migrations
 
-Check the current migration revision:
+Check the current revision:
 
 ```bash
 uv run --env-file .env alembic current
@@ -169,14 +167,11 @@ Create a migration after changing SQLAlchemy models:
 uv run --env-file .env alembic revision --autogenerate -m "describe the change"
 ```
 
-Review the generated migration before applying it:
+Review generated migrations before applying them:
 
 ```bash
 uv run --env-file .env alembic upgrade head
 ```
-
-Do not edit migrations that have already been applied. Create a new migration
-for subsequent schema changes.
 
 ## API
 
@@ -199,37 +194,9 @@ POST /v1/auth/logout
 GET  /v1/auth/me
 ```
 
-Signup request:
-
-```json
-{
-  "email": "user@example.com",
-  "password": "strong-password"
-}
-```
-
-Login returns an access token and a refresh token:
-
-```json
-{
-  "data": {
-    "access_token": "...",
-    "refresh_token": "...",
-    "token_type": "bearer"
-  },
-  "error": null
-}
-```
-
-Use the access token for protected endpoints:
-
-```http
-Authorization: Bearer <access_token>
-```
-
 ### Management API
 
-All Management API endpoints require a valid access token and project
+All Management API endpoints require a Bearer access token and project
 membership where applicable.
 
 ```http
@@ -240,31 +207,18 @@ PATCH  /v1/management/projects/{project_id}
 DELETE /v1/management/projects/{project_id}
 ```
 
-Project creation request:
-
-```json
-{
-  "name": "My Application",
-  "slug": "my-application"
-}
-```
-
-The authenticated creator receives an `owner` membership for the new project.
-
 ## Response format
 
-Successful response:
+Success:
 
 ```json
 {
-  "data": {
-    "status": "healthy"
-  },
+  "data": {},
   "error": null
 }
 ```
 
-Error response:
+Error:
 
 ```json
 {
@@ -276,7 +230,7 @@ Error response:
 }
 ```
 
-Clients should use the stable `error.code` for programmatic handling.
+Clients should use the stable `error.code` for programmatic error handling.
 
 ## Project structure
 
@@ -287,7 +241,7 @@ lumicore/
 ├── main.py         # FastAPI application and routes
 ├── models.py       # SQLAlchemy models
 ├── responses.py    # response models and exception handlers
-├── schemas.py      # Pydantic request/response schemas
+├── schemas.py      # Pydantic schemas
 └── security.py     # password hashing and JWT helpers
 
 migrations/         # Alembic migrations
