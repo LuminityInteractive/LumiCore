@@ -588,6 +588,61 @@ async def list_api_keys(
         data=key_responses,
     )
 
+@app.get(
+    "/v1/management/projects/{project_id}/api-keys/{key_id}",
+    response_model=APIResponse,
+)
+async def get_api_key(
+    project_id: UUID,
+    key_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
+    result = await db.execute(
+        select(APIKey).where(
+            APIKey.id == key_id,
+            APIKey.project_id == project_id,
+        )
+    )
+
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "API_KEY_NOT_FOUND",
+                "message": "The requested API key does not exist.",
+            },
+        )
+
+    response = APIKeyResponse.model_validate(api_key)
+
+    return APIResponse(
+        data=response.model_dump(mode="json"),
+    )
+
 @app.delete(
     "/v1/management/projects/{project_id}/api-keys/{key_id}",
     response_model=APIResponse,

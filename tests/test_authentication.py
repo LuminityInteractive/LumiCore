@@ -163,6 +163,60 @@ def test_owner_can_create_and_manage_project(client):
     assert deleted.status_code == 200
 
 
+def test_api_key_lifecycle(client):
+    email = f"api-key-lifecycle-{uuid4()}@example.com"
+    assert signup(client, email).status_code == 201
+    tokens = login(client, email)
+    headers = auth_headers(tokens["access_token"])
+
+    created_project = client.post(
+        "/v1/management/projects",
+        headers=headers,
+        json={
+            "name": "API Key Lifecycle",
+            "slug": f"api-key-lifecycle-{uuid4().hex[:8]}",
+        },
+    )
+    assert created_project.status_code == 201
+    project_id = created_project.json()["data"]["id"]
+
+    created_key = client.post(
+        f"/v1/management/projects/{project_id}/api-keys",
+        headers=headers,
+        json={"name": "Lifecycle key", "key_type": "public"},
+    )
+    assert created_key.status_code == 201
+    key_data = created_key.json()["data"]
+
+    key_list = client.get(
+        f"/v1/management/projects/{project_id}/api-keys",
+        headers=headers,
+    )
+    assert key_list.status_code == 200
+    assert any(item["id"] == key_data["id"] for item in key_list.json()["data"])
+
+    key_detail = client.get(
+        f"/v1/management/projects/{project_id}/api-keys/{key_data['id']}",
+        headers=headers,
+    )
+    assert key_detail.status_code == 200
+    assert key_detail.json()["data"]["key_prefix"] == key_data["key_prefix"]
+    assert "key" not in key_detail.json()["data"]
+
+    revoked = client.delete(
+        f"/v1/management/projects/{project_id}/api-keys/{key_data['id']}",
+        headers=headers,
+    )
+    assert revoked.status_code == 200
+
+    revoked_detail = client.get(
+        f"/v1/management/projects/{project_id}/api-keys/{key_data['id']}",
+        headers=headers,
+    )
+    assert revoked_detail.status_code == 200
+    assert revoked_detail.json()["data"]["revoked_at"] is not None
+
+
 def test_api_key_context(client):
     email = f"api-key-{uuid4()}@example.com"
     assert signup(client, email).status_code == 201
