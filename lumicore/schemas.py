@@ -1,6 +1,7 @@
 import uuid
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from datetime import datetime
+from typing import Literal
 
 class ProjectCreate(BaseModel):
     name: str = Field(
@@ -68,3 +69,37 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+class APIKeyCreate(BaseModel):
+    name: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    key_type: Literal["public", "secret"]
+
+    expires_at: datetime | None = None
+
+class APIKeyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    key_prefix: str
+    key_type: str
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+class APIKeyCreatedResponse(APIKeyResponse):
+    key: str
+
+class APIKeyContext(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    key_type: str

@@ -205,6 +205,26 @@ GET    /v1/management/projects
 GET    /v1/management/projects/{project_id}
 PATCH  /v1/management/projects/{project_id}
 DELETE /v1/management/projects/{project_id}
+
+POST   /v1/management/projects/{project_id}/api-keys
+GET    /v1/management/projects/{project_id}/api-keys
+GET    /v1/management/projects/{project_id}/api-keys/{key_id}
+DELETE /v1/management/projects/{project_id}/api-keys/{key_id}
+```
+
+API key requests use the `X-API-Key` header:
+
+```http
+X-API-Key: lc_pub_<key>
+```
+
+The full key is returned only once when it is created. Management API
+responses contain metadata and `key_prefix`, not the full key or key hash.
+
+A valid API key can be checked with:
+
+```http
+GET /v1/api-keys/me
 ```
 
 ## Response format

@@ -7,7 +7,7 @@ from sqlalchemy import delete
 
 from lumicore.database import engine
 from lumicore.main import app
-from lumicore.models import Project, ProjectMembership, RefreshToken, User
+from lumicore.models import APIKey, Project, ProjectMembership, RefreshToken, User
 
 
 async def clear_database() -> None:
@@ -15,6 +15,7 @@ async def clear_database() -> None:
 
     async with engine.begin() as connection:
         await connection.execute(delete(RefreshToken))
+        await connection.execute(delete(APIKey))
         await connection.execute(delete(ProjectMembership))
         await connection.execute(delete(User))
         await connection.execute(delete(Project))
