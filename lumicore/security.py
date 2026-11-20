@@ -1,12 +1,14 @@
 from pwdlib import PasswordHash
-import uuid
+import uuid, hashlib, secrets, jwt
 from datetime import datetime, timedelta, timezone
-import jwt
 from lumicore.config import settings
 from typing import Any
-import hashlib
 
 JWT_ALGORITHM = "HS256"
+API_KEY_PREFIXES = {
+    "public": "lc_pub_",
+    "secret": "lc_sec_",
+}
 
 password_hasher = PasswordHash.recommended()
 
@@ -20,6 +22,21 @@ def hash_token(token:str) -> str:
     return hashlib.sha256(
         token.encode("utf-8")
     ).hexdigest()
+
+def generate_api_key(
+    key_type: str,
+) -> tuple[str, str, str]:
+    prefix = API_KEY_PREFIXES.get(key_type)
+
+    if prefix is None:
+        raise ValueError("Unsupported API key type")
+
+    random_value = secrets.token_urlsafe(32)
+    full_key = f"{prefix}{random_value}"
+    key_prefix = f"{prefix}{random_value[:8]}"
+    key_hash = hash_token(full_key)
+
+    return full_key, key_prefix, key_hash
 
 def _create_token(
     user_id: uuid.UUID,
