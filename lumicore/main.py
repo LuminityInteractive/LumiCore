@@ -35,6 +35,7 @@ from lumicore.schemas import (
     TokenResponse,
     APIKeyCreate,
     APIKeyCreatedResponse,
+    APIKeyResponse,
 )
 from lumicore.security import (
     create_access_token,
@@ -480,6 +481,123 @@ async def create_api_key(
 
     return APIResponse(
         data=response.model_dump(mode="json"),
+    )
+
+@app.get(
+    "/v1/management/projects/{project_id}/api-keys",
+    response_model=APIResponse,
+)
+async def list_api_keys(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
+    result = await db.execute(
+        select(APIKey)
+        .where(APIKey.project_id == project_id)
+        .order_by(APIKey.created_at.desc())
+    )
+
+    api_keys = result.scalars().all()
+
+    key_responses = [
+        APIKeyResponse.model_validate(api_key).model_dump(mode="json")
+        for api_key in api_keys
+    ]
+
+    return APIResponse(
+        data=key_responses,
+    )
+
+@app.delete(
+    "/v1/management/projects/{project_id}/api-keys/{key_id}",
+    response_model=APIResponse,
+)
+async def revoke_api_key(
+    project_id: UUID,
+    key_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+
+    project = result.scalar_one_or_none()
+
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_NOT_FOUND",
+                "message": "The requested project does not exist.",
+            },
+        )
+
+    await require_project_membership(
+        project_id,
+        current_user,
+        db,
+    )
+
+    result = await db.execute(
+        select(APIKey).where(
+            APIKey.id == key_id,
+            APIKey.project_id == project_id,
+        )
+    )
+
+    api_key = result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "API_KEY_NOT_FOUND",
+                "message": "The requested API key does not exist.",
+            },
+        )
+
+    if api_key.revoked_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "API_KEY_ALREADY_REVOKED",
+                "message": "The API key has already been revoked.",
+            },
+        )
+
+    api_key.revoked_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(api_key)
+
+    return APIResponse(
+        data={
+            "id": str(api_key.id),
+            "revoked": True,
+        }
     )
 
 @app.post(
