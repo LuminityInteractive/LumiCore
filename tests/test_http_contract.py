@@ -30,6 +30,19 @@ def test_health_response():
     }
 
 
+def test_database_health_response():
+    response = client.get("/health/database")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "data": {
+            "status": "healthy",
+            "database": "healthy",
+        },
+        "error": None,
+    }
+
+
 def test_versioned_health_response():
     response = client.get("/v1/health")
 
